@@ -2,21 +2,45 @@ import lightgbm as lgb
 import numpy as np
 import pandas as pd
 from sklearn.metrics import accuracy_score, roc_auc_score
-from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error, mean_absolute_error  # 新增回归指标
+from sklearn.model_selection import train_test_split, cross_val_score
+from skopt import BayesSearchCV
 from src.models import *
 import math
+from lightgbm import LGBMClassifier
+from lightgbm import LGBMRegressor
+
+def train(data, label, params: dict, num_round: int = 100, test_data_save=False):
+    model = LGBMRegressor(n_estimators=num_round, **params)
+    model.fit(data, label)
+    return model
 
 
-def train(data, label, num_round: int = 100, test_data_save=False):
-    train_data = lgb.Dataset(data, label=label)
-    if test_data_save:
-        train_data.save_binary("train.bin")
-    bst = lgb.train(
-        params={"learning_rate": 0.1},
-        train_set=train_data,
-        num_boost_round=num_round,
+# 新增超参数搜索函数
+def hyperparameter_tuning(X, y):
+    search_space = {
+        "learning_rate": (0.01, 0.3, "log-uniform"),
+        "num_leaves": (20, 100),
+        "max_depth": (3, 15),
+        "min_child_samples": (10, 100),
+        "subsample": (0.7, 1.0, "uniform"),
+        "colsample_bytree": (0.7, 1.0, "uniform"),
+    }
+
+    # 修改为回归设置
+    opt = BayesSearchCV(
+        estimator=LGBMRegressor(verbose=-1),
+        search_spaces=search_space,
+        n_iter=30,
+        cv=3,
+        scoring="neg_mean_squared_error",  # 使用负均方误差作为评估指标
+        n_jobs=-1,
     )
-    return bst
+    opt.fit(X, y)
+
+    print("最佳参数:", opt.best_params_)
+    print("最佳MSE:", -opt.best_score_)  # 注意取负号得到真实MSE
+    return opt.best_estimator_
 
 
 def get_15top_players_in_team(team):
@@ -102,8 +126,26 @@ def get_feature_when_team_vs_team(teamname1: str, teamname2: str):
 
 def main():
     feature, label = preprocess()
+
+    # 划分数据集
+    X_train, X_test, y_train, y_test = train_test_split(
+        feature, label, test_size=0.2, random_state=42
+    )
+
+    # 超参数调优
+    print("开始超参数调优...")
+    best_model = hyperparameter_tuning(X_train, y_train)
+
+    # 最终模型
     global bst
-    bst = train(feature, label, num_round=10)
+    bst = best_model
+
+    # 回归评估
+    predicted = bst.predict(X_test)
+    print(f"测试集MSE: {mean_squared_error(y_test, predicted):.2f}")
+    print(f"测试集MAE: {mean_absolute_error(y_test, predicted):.2f}")
+
+    # 原有预测逻辑保持不变
     global pred_feature
     pred_feature = np.empty(num_feature)
     pred_feature = np.vstack(
@@ -130,8 +172,8 @@ def main():
             get_feature_when_team_vs_team("Indiana Pacers", "Denver Nuggets"),
         )
     )
-    global pred
-    pred = bst.predict(pred_feature[1:])
+    predicted = bst.predict(pred_feature[1:])
+    print(predicted)
 
 
 if __name__ == "__main__":

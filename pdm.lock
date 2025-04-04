@@ -5,7 +5,7 @@
 groups = ["default"]
 strategy = ["inherit_metadata"]
 lock_version = "4.5.0"
-content_hash = "sha256:3936acbe0fc492862aafdde9358be19227a18f7a3887e99dcb7679dd485c84ac"
+content_hash = "sha256:c27a635cf6a3e6629aadb34efd80442250d63526bf3777fb43792e9b162e08d8"
 
 [[metadata.targets]]
 requires_python = "==3.13.*"
@@ -291,6 +291,20 @@ files = [
 ]
 
 [[package]]
+name = "pyaml"
+version = "25.1.0"
+requires_python = ">=3.8"
+summary = "PyYAML-based module to produce a bit more pretty and readable YAML-serialized data"
+groups = ["default"]
+dependencies = [
+    "PyYAML",
+]
+files = [
+    {file = "pyaml-25.1.0-py3-none-any.whl", hash = "sha256:f7b40629d2dae88035657c860f539db3525ddd0120a11e0bcb44d47d5968b3bc"},
+    {file = "pyaml-25.1.0.tar.gz", hash = "sha256:33a93ac49218f57e020b81e280d2706cea554ac5a76445ac79add760d019c709"},
+]
+
+[[package]]
 name = "pyparsing"
 version = "3.2.3"
 requires_python = ">=3.9"
@@ -326,6 +340,25 @@ files = [
 ]
 
 [[package]]
+name = "pyyaml"
+version = "6.0.2"
+requires_python = ">=3.8"
+summary = "YAML parser and emitter for Python"
+groups = ["default"]
+files = [
+    {file = "PyYAML-6.0.2-cp313-cp313-macosx_10_13_x86_64.whl", hash = "sha256:efdca5630322a10774e8e98e1af481aad470dd62c3170801852d752aa7a783ba"},
+    {file = "PyYAML-6.0.2-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:50187695423ffe49e2deacb8cd10510bc361faac997de9efef88badc3bb9e2d1"},
+    {file = "PyYAML-6.0.2-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:0ffe8360bab4910ef1b9e87fb812d8bc0a308b0d0eef8c8f44e0254ab3b07133"},
+    {file = "PyYAML-6.0.2-cp313-cp313-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:17e311b6c678207928d649faa7cb0d7b4c26a0ba73d41e99c4fff6b6c3276484"},
+    {file = "PyYAML-6.0.2-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:70b189594dbe54f75ab3a1acec5f1e3faa7e8cf2f1e08d9b561cb41b845f69d5"},
+    {file = "PyYAML-6.0.2-cp313-cp313-musllinux_1_1_aarch64.whl", hash = "sha256:41e4e3953a79407c794916fa277a82531dd93aad34e29c2a514c2c0c5fe971cc"},
+    {file = "PyYAML-6.0.2-cp313-cp313-musllinux_1_1_x86_64.whl", hash = "sha256:68ccc6023a3400877818152ad9a1033e3db8625d899c72eacb5a668902e4d652"},
+    {file = "PyYAML-6.0.2-cp313-cp313-win32.whl", hash = "sha256:bc2fa7c6b47d6bc618dd7fb02ef6fdedb1090ec036abab80d4681424b84c1183"},
+    {file = "PyYAML-6.0.2-cp313-cp313-win_amd64.whl", hash = "sha256:8388ee1976c416731879ac16da0aff3f63b286ffdd57cdeb95f3f2e085687563"},
+    {file = "pyyaml-6.0.2.tar.gz", hash = "sha256:d584d9ec91ad65861cc08d42e834324ef890a082e591037abe114850ff7bbc3e"},
+]
+
+[[package]]
 name = "scikit-learn"
 version = "1.6.1"
 requires_python = ">=3.9"
@@ -348,6 +381,24 @@ files = [
     {file = "scikit_learn-1.6.1-cp313-cp313t-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:0650e730afb87402baa88afbf31c07b84c98272622aaba002559b614600ca691"},
     {file = "scikit_learn-1.6.1-cp313-cp313t-win_amd64.whl", hash = "sha256:3f59fe08dc03ea158605170eb52b22a105f238a5d512c4470ddeca71feae8e5f"},
     {file = "scikit_learn-1.6.1.tar.gz", hash = "sha256:b4fc2525eca2c69a59260f583c56a7557c6ccdf8deafdba6e060f94c1c59738e"},
+]
+
+[[package]]
+name = "scikit-optimize"
+version = "0.10.2"
+summary = "Sequential model-based optimization toolbox."
+groups = ["default"]
+dependencies = [
+    "joblib>=0.11",
+    "numpy>=1.20.3",
+    "packaging>=21.3",
+    "pyaml>=16.9",
+    "scikit-learn>=1.0.0",
+    "scipy>=1.1.0",
+]
+files = [
+    {file = "scikit_optimize-0.10.2-py2.py3-none-any.whl", hash = "sha256:45bc7e879b086133984721f2f6735a86c085073f6c481c2ec665b5c67b44d723"},
+    {file = "scikit_optimize-0.10.2.tar.gz", hash = "sha256:00a3d91bf9015e292b6e7aaefe7e6cb95e8d25ce19adafd2cd88849e1a0b0da0"},
 ]
 
 [[package]]
