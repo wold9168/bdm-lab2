@@ -10,16 +10,22 @@ import math
 from lightgbm import LGBMClassifier
 from lightgbm import LGBMRegressor
 
-def train(data, label, params: dict, num_round: int = 100, test_data_save=False):
-    model = LGBMRegressor(n_estimators=num_round, **params)
-    model.fit(data, label)
-    return model
+
+def train(data, label, num_round: int = 100, test_data_save=False):
+    train_data = lgb.Dataset(data, label=label)
+    if test_data_save:
+        train_data.save_binary("train.bin")
+    bst = lgb.train(
+        params={"learning_rate": 0.1},
+        train_set=train_data,
+        num_boost_round=num_round,
+    )
+    return bst
 
 
-# 新增超参数搜索函数
 def hyperparameter_tuning(X, y):
     search_space = {
-        "learning_rate": (0.01, 0.3, "log-uniform"),
+        "learning_rate": (0.01, 0.3, "log-uniform"),  # 学习率范围
         "num_leaves": (20, 100),
         "max_depth": (3, 15),
         "min_child_samples": (10, 100),
@@ -126,10 +132,12 @@ def get_feature_when_team_vs_team(teamname1: str, teamname2: str):
 
 def main():
     feature, label = preprocess()
-
+    df_feature = pd.DataFrame(
+        feature, columns=players[0].get_features_names()[1]
+    )
     # 划分数据集
     X_train, X_test, y_train, y_test = train_test_split(
-        feature, label, test_size=0.2, random_state=42
+        df_feature, label, test_size=0.2, random_state=42
     )
 
     # 超参数调优
@@ -174,6 +182,11 @@ def main():
     )
     predicted = bst.predict(pred_feature[1:])
     print(predicted)
+    rawmodel = train(feature, label, 5)
+    raw_predicted = rawmodel.predict(pred_feature[1:])
+    # print(f"原始模型的测试集MSE: {mean_squared_error(y_test, raw_predicted):.2f}")
+    # print(f"原始模型的测试集MAE: {mean_absolute_error(y_test, raw_predicted):.2f}")
+    print(raw_predicted)
 
 
 if __name__ == "__main__":

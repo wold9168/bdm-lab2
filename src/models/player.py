@@ -131,6 +131,22 @@ class Player:
             f"player_additional='{self.player_additional}')"
         )
 
+    def get_features_names(self):
+        ignore_attributes = [
+            "rk",
+            "player_name",
+            "team",
+            "pos",
+            "awards",
+            "player_additional",
+        ]
+        features_names = [
+            attr
+            for attr in Player.__static_attributes__
+            if attr not in ignore_attributes
+        ]
+        return ((self.team, self.pos), features_names)
+
     def get_features(self):
         ignore_attributes = [
             "rk",
@@ -146,7 +162,7 @@ class Player:
             if attr not in ignore_attributes
         ]
         features = [self.__dict__[features_name] for features_name in features_names]
-        for i,feature in enumerate(features):
+        for i, feature in enumerate(features):
             if math.isnan(feature):
                 features[i] = 0.0
         return ((self.team, self.pos), features)
