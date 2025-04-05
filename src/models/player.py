@@ -131,7 +131,8 @@ class Player:
             f"player_additional='{self.player_additional}')"
         )
 
-    def get_features_names(self):
+    @staticmethod
+    def get_features_names():
         ignore_attributes = [
             "rk",
             "player_name",
@@ -145,7 +146,7 @@ class Player:
             for attr in Player.__static_attributes__
             if attr not in ignore_attributes
         ]
-        return ((self.team, self.pos), features_names)
+        return features_names
 
     def get_features(self):
         ignore_attributes = [

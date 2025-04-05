@@ -61,64 +61,84 @@ def get_15top_players_in_team(team):
 
 
 def preprocess():
-    global allteam
+    initialize_globals()
+    load_team_vs_team_data("./data/team_vs_team.csv")
+    players = load_players("./data/player_stats_total.csv")
+    filtered_players = filter_players(players)
+    assign_players_to_teams(filtered_players)
+    global team_features
+    team_features = compute_all_team_features()
+    # 加新特征的话加到team_features
+    pair_features, pair_labels = build_dataset(team_features)
+    return pair_features, pair_labels
+
+
+def initialize_globals():
+    global allteam, teamvsteam, feature_index
     allteam = AllTeam()
-    global teamvsteam
     teamvsteam = TeamVSTeam()
-    teamvsteam.read_and_process_csv("./data/team_vs_team.csv")
-    global players
-    players = Player.import_from_csv(Player, "./data/player_stats_total.csv")
-    ignore_team = ["2TM", "3TM"]
-    # global pos
-    # pos = []
-    for player in players:
-        if player.team in ignore_team:
-            continue
-        if type(player.team) != str:
-            continue
-        # if player.pos not in pos:
-        #     pos.append(player.pos)
-        allteam.get_team_with_name(player.team).add_player(player)
-    num_teams = len(allteam.get_all_teams())
-    global num_feature
-    num_feature = len(players[0].get_features()[1])
-    global result_feature
-    result_feature = np.empty((num_teams, num_feature))  # 预分配空间
-    for i, team in enumerate(allteam.get_all_teams()):
-        result_feature[i] = get_15top_players_in_team(team)
-        # result_feature correspond with the order of teams in allteam.get_all_teams()
-    global final_feature
-    final_feature = np.empty(num_feature)
-    global final_label
-    final_label = np.empty(1)
-    global feature_index
     feature_index = {}
-    for i, host_team in enumerate(result_feature):
-        for j, guest_team in enumerate(result_feature):
-            if i != j:
-                host_team_name_abbr = allteam.get_all_teams()[i].name_abbr
-                guest_team_name_abbr = allteam.get_all_teams()[j].name_abbr
-                # print(
-                #     host_team_name_abbr,
-                #     "vs",
-                #     guest_team_name_abbr,
-                #     ":",
-                #     teamvsteam.get_history(host_team_name_abbr, guest_team_name_abbr)
-                # )
-                final_feature = np.vstack((final_feature, host_team - guest_team))
-                final_label = np.append(
-                    final_label,
-                    teamvsteam.get_history(host_team_name_abbr, guest_team_name_abbr),
-                )
-                feature_index.update(
-                    {
-                        (host_team_name_abbr, guest_team_name_abbr): host_team
-                        - guest_team
-                    }
-                )
-    final_label = final_label[1:]
-    final_feature = final_feature[1:]
-    return (final_feature, final_label)
+
+
+def load_team_vs_team_data(filepath):
+    teamvsteam.read_and_process_csv(filepath)
+
+
+def load_players(filepath):
+    return Player.import_from_csv(Player, filepath)
+
+
+def filter_players(raw_players, ignore_teams=["2TM", "3TM"]):
+    return [
+        p for p in raw_players if isinstance(p.team, str) and p.team not in ignore_teams
+    ]
+
+
+def assign_players_to_teams(valid_players):
+    for player in valid_players:
+        allteam.get_team_with_name(player.team).add_player(player)
+
+
+def compute_team_features(team):
+    return get_15top_players_in_team(team)
+
+
+def compute_all_team_features():
+    teams = allteam.get_all_teams()
+    global num_features
+    num_features = len(teams[0].players[0].get_features()[1])
+    features = np.empty((len(teams), num_features))
+
+    for i, team in enumerate(teams):
+        features[i] = compute_team_features(team)
+    return features
+
+
+def build_dataset(team_features):
+    teams = allteam.get_all_teams()
+    feature_diffs = []
+    labels = []
+
+    for i, host_feature in enumerate(team_features):
+        for j, guest_feature in enumerate(team_features):
+            if i == j:
+                continue
+
+            host_abbr = teams[i].name_abbr
+            guest_abbr = teams[j].name_abbr
+
+            # 计算特征差异
+            feature_diff = host_feature - guest_feature
+            feature_diffs.append(feature_diff)
+
+            # 获取历史记录
+            history = teamvsteam.get_history(host_abbr, guest_abbr)
+            labels.append(history)
+
+            # 记录特征索引
+            feature_index[(host_abbr, guest_abbr)] = feature_diff
+
+    return np.array(feature_diffs), np.array(labels)
 
 
 def get_feature_when_team_vs_team(teamname1: str, teamname2: str):
@@ -132,9 +152,7 @@ def get_feature_when_team_vs_team(teamname1: str, teamname2: str):
 
 def main():
     feature, label = preprocess()
-    df_feature = pd.DataFrame(
-        feature, columns=players[0].get_features_names()[1]
-    )
+    df_feature = pd.DataFrame(feature, columns=Player.get_features_names())
     # 划分数据集
     X_train, X_test, y_train, y_test = train_test_split(
         df_feature, label, test_size=0.2, random_state=42
@@ -155,12 +173,8 @@ def main():
 
     # 原有预测逻辑保持不变
     global pred_feature
-    pred_feature = np.empty(num_feature)
-    pred_feature = np.vstack(
-        (
-            pred_feature,
-            get_feature_when_team_vs_team("Milwaukee Bucks", "New Orleans Pelicans"),
-        )
+    pred_feature = np.array(
+        get_feature_when_team_vs_team("Milwaukee Bucks", "New Orleans Pelicans"),
     )
     pred_feature = np.vstack(
         (
@@ -180,10 +194,11 @@ def main():
             get_feature_when_team_vs_team("Indiana Pacers", "Denver Nuggets"),
         )
     )
-    predicted = bst.predict(pred_feature[1:])
+
+    predicted = bst.predict(pred_feature)
     print(predicted)
     rawmodel = train(feature, label, 5)
-    raw_predicted = rawmodel.predict(pred_feature[1:])
+    raw_predicted = rawmodel.predict(pred_feature)
     # print(f"原始模型的测试集MSE: {mean_squared_error(y_test, raw_predicted):.2f}")
     # print(f"原始模型的测试集MAE: {mean_absolute_error(y_test, raw_predicted):.2f}")
     print(raw_predicted)
