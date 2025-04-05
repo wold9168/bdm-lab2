@@ -1,207 +1,242 @@
-import lightgbm as lgb
-import numpy as np
 import pandas as pd
-from sklearn.metrics import accuracy_score, roc_auc_score
-from sklearn.metrics import mean_squared_error, mean_absolute_error  # 新增回归指标
-from sklearn.model_selection import train_test_split, cross_val_score
-from skopt import BayesSearchCV
-from src.models import *
-import math
-from lightgbm import LGBMClassifier
-from lightgbm import LGBMRegressor
+import numpy as np
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+import lightgbm as lgb
+import matplotlib.pyplot as plt
+import seaborn as sns
+from src.preprocess import *
+from src.teamvs_histroy import *
+from joblib import parallel_backend
 
 
-def train(data, label, num_round: int = 100, test_data_save=False):
-    train_data = lgb.Dataset(data, label=label)
-    if test_data_save:
-        train_data.save_binary("train.bin")
-    bst = lgb.train(
-        params={"learning_rate": 0.1},
-        train_set=train_data,
-        num_boost_round=num_round,
-    )
-    return bst
+def build_dataset(team_power, query):
+    """将队伍战斗力数据转换为模型可用的特征矩阵"""
+    # 获取所有队伍简称
+    teams = team_power["Team"].tolist()
 
-
-def hyperparameter_tuning(X, y):
-    search_space = {
-        "learning_rate": (0.01, 0.3, "log-uniform"),  # 学习率范围
-        "num_leaves": (20, 100),
-        "max_depth": (3, 15),
-        "min_child_samples": (10, 100),
-        "subsample": (0.7, 1.0, "uniform"),
-        "colsample_bytree": (0.7, 1.0, "uniform"),
-    }
-
-    # 修改为回归设置
-    opt = BayesSearchCV(
-        estimator=LGBMRegressor(verbose=-1),
-        search_spaces=search_space,
-        n_iter=30,
-        cv=3,
-        scoring="neg_mean_squared_error",  # 使用负均方误差作为评估指标
-        n_jobs=-1,
-    )
-    opt.fit(X, y)
-
-    print("最佳参数:", opt.best_params_)
-    print("最佳MSE:", -opt.best_score_)  # 注意取负号得到真实MSE
-    return opt.best_estimator_
-
-
-def get_15top_players_in_team(team):
-    sorted_players = sorted(team.players, key=lambda x: x.pts, reverse=True)
-    top_15_players = sorted_players[:15]
-    top_15_players_feature = [player.get_features()[1] for player in top_15_players]
-    top_15_players_feature_sum = np.empty(len(top_15_players_feature[0]))
-    for row in top_15_players_feature:
-        for i, attr in enumerate(row):
-            top_15_players_feature_sum[i] += attr
-    return top_15_players_feature_sum
-
-
-def preprocess():
-    initialize_globals()
-    load_team_vs_team_data("./data/team_vs_team.csv")
-    players = load_players("./data/player_stats_total.csv")
-    filtered_players = filter_players(players)
-    assign_players_to_teams(filtered_players)
-    global team_features
-    team_features = compute_all_team_features()
-    # 加新特征的话加到team_features
-    pair_features, pair_labels = build_dataset(team_features)
-    return pair_features, pair_labels
-
-
-def initialize_globals():
-    global allteam, teamvsteam, feature_index
-    allteam = AllTeam()
-    teamvsteam = TeamVSTeam()
-    feature_index = {}
-
-
-def load_team_vs_team_data(filepath):
-    teamvsteam.read_and_process_csv(filepath)
-
-
-def load_players(filepath):
-    return Player.import_from_csv(Player, filepath)
-
-
-def filter_players(raw_players, ignore_teams=["2TM", "3TM"]):
-    return [
-        p for p in raw_players if isinstance(p.team, str) and p.team not in ignore_teams
+    # 生成所有可能的队伍对战组合（排除相同队伍）
+    ignore_team = ["2TM", "3TM"]
+    matchups = [
+        (t1, t2)
+        for t1 in teams
+        for t2 in teams
+        if t1 != t2 and t1 not in ignore_team and t2 not in ignore_team
     ]
 
-
-def assign_players_to_teams(valid_players):
-    for player in valid_players:
-        allteam.get_team_with_name(player.team).add_player(player)
-
-
-def compute_team_features(team):
-    return get_15top_players_in_team(team)
-
-
-def compute_all_team_features():
-    teams = allteam.get_all_teams()
-    global num_features
-    num_features = len(teams[0].players[0].get_features()[1])
-    features = np.empty((len(teams), num_features))
-
-    for i, team in enumerate(teams):
-        features[i] = compute_team_features(team)
-    return features
-
-
-def build_dataset(team_features):
-    teams = allteam.get_all_teams()
-    feature_diffs = []
+    # 构造特征矩阵
+    features = []
     labels = []
 
-    for i, host_feature in enumerate(team_features):
-        for j, guest_feature in enumerate(team_features):
-            if i == j:
-                continue
+    for t1, t2 in matchups:
+        # 获取两队特征（假设team_power的索引是队伍简称）
+        ft1 = team_power.loc[team_power["Team"] == t1].values[0][1:]
+        ft2 = team_power.loc[team_power["Team"] == t2].values[0][1:]
 
-            host_abbr = teams[i].name_abbr
-            guest_abbr = teams[j].name_abbr
+        # 构造特征：队伍1特征 - 队伍2特征（差值特征）
+        feature_diff = ft1 - ft2
+        features.append(feature_diff)
 
-            # 计算特征差异
-            feature_diff = host_feature - guest_feature
-            feature_diffs.append(feature_diff)
+        # 获取标签：历史分差
+        labels.append(query.get_diff(t1, t2))
 
-            # 获取历史记录
-            history = teamvsteam.get_history(host_abbr, guest_abbr)
-            labels.append(history)
-
-            # 记录特征索引
-            feature_index[(host_abbr, guest_abbr)] = feature_diff
-
-    return np.array(feature_diffs), np.array(labels)
+    return np.array(features), np.array(labels)
 
 
-def get_feature_when_team_vs_team(teamname1: str, teamname2: str):
-    return feature_index.get(
-        (
-            allteam.get_team_abbr_with_name(teamname1),
-            allteam.get_team_abbr_with_name(teamname2),
-        )
+# 评估指标
+def evaluate(model, X_test, y_test):
+    y_pred = model.predict(X_test)
+    print(f"MAE: {mean_absolute_error(y_test, y_pred):.2f}")
+    print(f"RMSE: {np.sqrt(mean_squared_error(y_test, y_pred)):.2f}")
+
+
+def predict(model, team_power, team1: str, team2: str):
+    y_pred = model.predict(
+        np.array(
+            team_power.loc[team_power["Team"] == team1].values[0][1:]
+            - team_power.loc[team_power["Team"] == team2].values[0][1:]
+        ).reshape(1, -1)
     )
+    return y_pred
 
 
 def main():
-    feature, label = preprocess()
-    df_feature = pd.DataFrame(feature, columns=Player.get_features_names())
-    # 划分数据集
+    # --------------------------------------------------
+    # 加载数据
+    # --------------------------------------------------
+    # 假设预处理后的战斗力数据
+    global team_power
+    team_power = Preprocess().preprocess()
+
+    # 添加BMI相关特征
+    # team_power["bmi_avg"] = team_power["player_bmi"].mean()  # 平均BMI
+    # team_power["bmi_diff"] = team_power["player_bmi"] - team_power["bmi_avg"]  # BMI差值
+
+    # 加载历史对战数据
+    global query
+    query = TeamQuery(process_teamvs_data(pd.read_csv("./data/team_vs_team.csv")))
+
+    # 构建数据集
+    X, y = build_dataset(team_power, query)
+
+    # 划分训练测试集
     X_train, X_test, y_train, y_test = train_test_split(
-        df_feature, label, test_size=0.2, random_state=42
+        X, y, test_size=0.2, random_state=40
     )
 
-    # 超参数调优
-    print("开始超参数调优...")
-    best_model = hyperparameter_tuning(X_train, y_train)
+    # --------------------------------------------------
+    # 训练基准模型（包含BMI特征）
+    # --------------------------------------------------
+    # 初始参数
+    params = {
+        "objective": "regression",
+        "metric": "mae",
+        "boosting_type": "gbdt",
+        "num_leaves": 31,
+        "learning_rate": 0.05,
+        "feature_fraction": 0.9,
+        "verbose": -1,
+    }
 
-    # 最终模型
-    global bst
-    bst = best_model
+    # 训练模型
+    global model_with_bmi
+    model_with_bmi = lgb.LGBMRegressor(**params)
+    model_with_bmi.fit(X_train, y_train)
 
-    # 回归评估
-    predicted = bst.predict(X_test)
-    print(f"测试集MSE: {mean_squared_error(y_test, predicted):.2f}")
-    print(f"测试集MAE: {mean_absolute_error(y_test, predicted):.2f}")
+    print("包含BMI特征的模型表现：")
+    evaluate(model_with_bmi, X_test, y_test)
 
-    # 原有预测逻辑保持不变
-    global pred_feature
-    pred_feature = np.array(
-        get_feature_when_team_vs_team("Milwaukee Bucks", "New Orleans Pelicans"),
+    # --------------------------------------------------
+    # BMI特征重要性分析
+    # --------------------------------------------------
+    # 获取特征名称（假设team_power的特征顺序与构造时一致）
+    feature_names = [f"{col}_diff" for col in team_power.columns]
+
+    # 可视化特征重要性
+    # lgb.plot_importance(
+    #     model_with_bmi, figsize=(12, 6), title="Feature Importance (with BMI)"
+    # )
+    # plt.show()
+
+    # 对比实验：移除BMI特征
+    X_train_no_bmi = np.delete(
+        X_train,
+        [
+            feature_names.index("player_bmi_diff") - 1,
+            # feature_names.index("bmi_avg_diff") - 1,
+            # feature_names.index("bmi_diff_diff") - 1,
+        ],
+        axis=1,
     )
-    pred_feature = np.vstack(
-        (
-            pred_feature,
-            get_feature_when_team_vs_team("New Orleans Pelicans", "Milwaukee Bucks"),
-        )
+    X_test_no_bmi = np.delete(
+        X_test,
+        [
+            feature_names.index("player_bmi_diff") - 1,
+            # feature_names.index("bmi_avg_diff") - 1,
+            # feature_names.index("bmi_diff_diff") - 1,
+        ],
+        axis=1,
     )
-    pred_feature = np.vstack(
-        (
-            pred_feature,
-            get_feature_when_team_vs_team("Houston Rockets", "Golden State Warriors"),
-        )
+    global model_without_bmi
+    model_without_bmi = lgb.LGBMRegressor(**params)
+    model_without_bmi.fit(X_train_no_bmi, y_train)
+
+    print("\n不包含BMI特征的模型表现：")
+    evaluate(model_without_bmi, X_test_no_bmi, y_test)
+
+    # --------------------------------------------------
+    # 超参数网格搜索
+    # --------------------------------------------------
+    # 定义参数网格
+    param_grid = {
+        "num_leaves": [10, 15, 30],
+        "learning_rate": [0.01, 0.05, 0.1],
+        "max_depth": [1, 3, 5],
+        "min_child_samples": [10, 30],
+        "verbose": [-1],
+    }
+    # 网格搜索
+    grid = GridSearchCV(
+        estimator=lgb.LGBMRegressor(objective="regression", metric="mae"),
+        param_grid=param_grid,
+        cv=3,
+        scoring="neg_mean_absolute_error",
+        verbose=2,
+        n_jobs=-1,
     )
-    pred_feature = np.vstack(
-        (
-            pred_feature,
-            get_feature_when_team_vs_team("Indiana Pacers", "Denver Nuggets"),
-        )
+    grid.fit(X_train, y_train)
+    # 输出最佳参数
+    print(f"最佳参数组合：{grid.best_params_}")
+    print(f"最佳MAE：{-grid.best_score_:.2f}")
+
+    # --------------------------------------------------
+    # 优化后模型评估
+    # --------------------------------------------------
+    optimized_model = grid.best_estimator_
+    print("\n优化后模型表现：")
+    evaluate(optimized_model, X_test, y_test)
+
+    # 对比优化前后
+    y_pred_base = model_with_bmi.predict(X_test)
+    y_pred_opt = optimized_model.predict(X_test)
+
+    print("\n优化前后对比：")
+    print(f"基准模型 MAE: {mean_absolute_error(y_test, y_pred_base):.2f}")
+    print(f"优化模型 MAE: {mean_absolute_error(y_test, y_pred_opt):.2f}")
+    print(
+        f"提升幅度: {(mean_absolute_error(y_test, y_pred_base) - mean_absolute_error(y_test, y_pred_opt)):.2f}"
     )
 
-    predicted = bst.predict(pred_feature)
-    print(predicted)
-    rawmodel = train(feature, label, 5)
-    raw_predicted = rawmodel.predict(pred_feature)
-    # print(f"原始模型的测试集MSE: {mean_squared_error(y_test, raw_predicted):.2f}")
-    # print(f"原始模型的测试集MAE: {mean_absolute_error(y_test, raw_predicted):.2f}")
-    print(raw_predicted)
+    # 残差分析
+    residuals = y_test - y_pred_opt
+    sns.histplot(residuals, kde=True)
+    plt.title("Optimized Model Residual Distribution")
+    plt.xlabel("Prediction Error")
+    plt.show()
+    # --------------------------------------------------
+    # 生成分析报告
+    # --------------------------------------------------
+    # BMI特征重要性数据
+    bmi_importance = model_with_bmi.feature_importances_[
+        feature_names.index("player_bmi_diff")
+        - 1
+        # Team_power(feature_names)的[0]是Team名，但是传入的训练参数是[1:]
+        # In [16]: feature_names.index("player_bmi_diff")
+        # Out[16]: 43
+        # In [17]: team_power.columns.to_list()[1:].index("player_bmi")
+        # Out[17]: 42
+    ]
+    avg_importance = np.mean(model_with_bmi.feature_importances_)
+
+    # 性能对比数据
+    mae_with = mean_absolute_error(y_test, model_with_bmi.predict(X_test))
+    mae_without = mean_absolute_error(y_test, model_without_bmi.predict(X_test_no_bmi))
+
+    # 参数优化提升
+    mae_improvement = mean_absolute_error(y_test, y_pred_base) - mean_absolute_error(
+        y_test, y_pred_opt
+    )
+
+    print(
+        f"""
+    ============ 分析报告 ============
+    1. BMI特征影响：
+        - BMI特征重要性得分：{bmi_importance}（平均特征得分：{avg_importance:.1f}）
+        - 包含BMI的模型MAE：{mae_with:.2f}
+        - 不含BMI的模型MAE：{mae_without:.2f}
+        - BMI带来的MAE提升：{mae_without - mae_with:.2f}
+
+    2. 超参数优化效果：
+        - 优化后MAE提升：{mae_improvement:.2f}
+        - 最佳参数组合：{grid.best_params_}
+
+    3. 残差分析：
+        - 残差均值：{np.mean(residuals):.2f}
+        - 残差标准差：{np.std(residuals):.2f}
+        - 95%预测误差范围：[{np.percentile(residuals, 2.5):.1f}, {np.percentile(residuals, 97.5):.1f}]
+    ================================
+    """
+    )
 
 
 if __name__ == "__main__":
